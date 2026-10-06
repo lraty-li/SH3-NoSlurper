@@ -6,3 +6,13 @@
 *.VC.VC.opendb
 .vs/
 NoSlurper.log
+
+# Local IDA databases / generated reports
+reverse/*.i64
+reverse/*.idb
+reverse/*.id0
+reverse/*.id1
+reverse/*.id2
+reverse/*.nam
+reverse/*.til
+reverse/*.txt

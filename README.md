@@ -2,60 +2,94 @@
 
 A tiny ASI mod for the Windows PC version of **Silent Hill 3**.
 
-It does one thing: every Slurper enemy descriptor is converted to the game's known
-**Brown Slurper / Dead** state before it can remain active.
+Version 0.2 preserves every Slurper's original type, model, color/variant, and
+scene placement. It only sets the instantiated enemy's **current HP** to zero and
+lets Silent Hill 3's own Slurper death logic handle the rest.
 
-## Behavior
+## What it changes
 
-The game uses these enemy IDs in its entity descriptors:
+Runtime enemy types:
 
-- Brown Slurper: `0x20A`
-- White Slurper: `0x20B`
-- Brown Slurper "Dead" state: `0x17`
+- Slurper E: `0x20A`
+- Slurper X: `0x20B`
 
-This mod applies the following transformation:
+For either type, once the enemy has been fully initialized:
 
-- `0x20A` Brown Slurper -> keep type `0x20A`, force state `0x17`
-- `0x20B` White Slurper -> change type to `0x20A`, force state `0x17`
-- Every other entity type -> untouched
+- type ID is left untouched;
+- descriptor variant/state is left untouched;
+- model/material/scene data is left untouched;
+- max HP is left untouched;
+- **current HP is set to 0.0f**.
 
-It does **not** set an entity type to zero. In SH3, a zero type ID terminates an
-entity-descriptor list, so doing that could prevent later entities in the same list
-from loading.
+Every other enemy is ignored.
 
-The patcher runs periodically because the game can change or initialize entity-list
-pointers after the ASI has already loaded. The pass is intentionally small and only
-writes when it sees one of the two Slurper type IDs.
+This fixes the v0.1 behavior where `0x20B` had to be converted to `0x20A`
+in order to reuse the known Brown Slurper dead descriptor. That conversion could
+visibly change special/red/pale Slurper appearances and is no longer used.
 
-## Compatibility / safety
+## Why setting HP to zero works
 
-The mod does not hard-code the enemy table address. At runtime it scans the game's
-`.text` section for the pair of instructions that reference the enemy-table pointer,
-then validates all memory before reading or writing it.
+IDA analysis of the installed PC executable found:
 
-The implementation was researched against a compatible 32-bit Windows executable build:
+- enemy-manager allocator: `0x004A2E20`
+- current-build enemy manager: `0x071294C0`
+- enemy-manager slot size: `0x160`
+- active/index byte: slot `+0x158`
+- SubCharacter pointer: slot `+0x04`
+- enemy kind: SubCharacter `+0x80`
+- current HP: SubCharacter `+0x180`
+- max HP: SubCharacter `+0x184`
 
-`<SH3_DIR>\SILENT HILL 3.exe`
+The mod does **not** hard-code the manager address. It signature-scans the
+allocator and extracts the manager pointer from the instruction.
 
-Observed hashes during development:
+The Slurper initialization functions are:
 
-- CRC32: `6368fb1f`
-- SHA-256: `3B8B78D0D3C8E266FA17CE983E59F259413A968015249F3BE90C356B0F815122`
+- `0x004FE9D0` — type `0x20A`
+- `0x004FE7E0` — type `0x20B`
 
-If the code signature is not found on another executable, the ASI does nothing rather
-than falling back to a guessed address.
+Both initialize current/max HP at `+0x180/+0x184`.
+
+Most importantly, both types attach the same game callback:
+
+- `0x004F4F70`
+
+That callback explicitly branches on current HP. When HP is greater than zero it
+continues the live path; when HP is zero or below it selects the game's normal
+Slurper death animation/state. Version 0.2 therefore uses the game's own death
+path rather than changing the enemy into another variant.
 
 ## Install
 
-1. Build **Release | Win32**.
-2. Copy `NoSlurper.asi` to the game's ASI-loader folder.
-   With Ultimate ASI Loader / ThirteenAG fixes this is typically:
-   `<Silent Hill 3>\scripts\NoSlurper.asi`
-3. Launch the game normally.
-4. `NoSlurper.log` is written next to the ASI and records whether the enemy table
-   was found and how many Slurpers were patched.
+Build **Release | Win32**, then copy:
 
-To uninstall, delete `NoSlurper.asi`. No save files or game archives are modified.
+`build\Release\NoSlurper.asi`
+
+to:
+
+`<Silent Hill 3>\scripts\NoSlurper.asi`
+
+Install destination:
+
+`<SH3_DIR>\scripts\NoSlurper.asi`
+
+Ultimate ASI Loader is already present in that installation.
+
+A `NoSlurper.log` file is written next to the ASI. Version 0.2 log entries say
+`runtime-HP` and report how many `0x20A` / `0x20B` enemies had their HP
+zeroed.
+
+## Uninstall / rollback
+
+Delete:
+
+`scripts\NoSlurper.asi`
+
+No save files, stage archives, enemy descriptors, or executable bytes are
+modified on disk.
+
+If a previous ASI was backed up during installation, restoring that file reverts
+to the older implementation.
 
 ## Build
 
@@ -73,28 +107,42 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-The ASI is produced under:
+## Compatibility notes
 
-`build\Release\NoSlurper.asi`
+The implementation was researched against a compatible 32-bit Windows executable build:
 
-## Research references
+`<SH3_DIR>\SILENT HILL 3.exe`
 
-The entity-table layout and Slurper IDs/states were cross-checked against the
-open-source RandomHill implementations:
+Observed hashes:
+
+- CRC32: `6368fb1f`
+- SHA-256: `3B8B78D0D3C8E266FA17CE983E59F259413A968015249F3BE90C356B0F815122`
+
+The runtime lookup is signature-based. If the enemy-manager allocator signature
+is not found, the mod does nothing rather than using a guessed address.
+
+## Research basis
+
+The initial entity-type research was cross-checked against:
 
 - JokieW/RandomHill
 - mercury501/silent_hill_randomizer
+- dreamingmoths/memory-of-alessa (Silent Hill 3 decompilation)
 
-Those projects show a 40-entry table rooted at the SH3 enemy-table pointer, entity
-records of `0x18` bytes, type ID at `+0x00`, and variant/state at `+0x16`.
+The final v0.2 runtime offsets and death-path behavior were verified directly in
+IDA 9.2 against the installed Windows executable.
+
+See `reverse/NOTES.md` for the specific findings.
 
 ## Scope
 
-This project deliberately does **not**:
+The mod deliberately does **not**:
 
-- randomize or replace other enemies;
+- replace one Slurper type with another;
+- modify Slurper descriptor variants;
+- randomize other enemies;
 - alter bosses;
-- edit SH3 data archives;
+- edit game archives;
 - modify saves;
-- change controller/input mods;
-- change game difficulty.
+- modify controller/input behavior;
+- modify game difficulty.

@@ -1,58 +1,60 @@
 #include "patch_core.hpp"
 
+#include <cmath>
 #include <cstring>
 
 namespace sh3_noslurper
 {
 namespace
 {
-std::uint16_t ReadU16(const std::byte* address) noexcept
+template <typename T>
+T ReadValue(const std::byte* address) noexcept
 {
-    std::uint16_t value = 0;
+    T value{};
     std::memcpy(&value, address, sizeof(value));
     return value;
 }
 
-void WriteU16(std::byte* address, std::uint16_t value) noexcept
+template <typename T>
+void WriteValue(std::byte* address, const T& value) noexcept
 {
     std::memcpy(address, &value, sizeof(value));
 }
 } // namespace
 
-PatchStats PatchEntityList(std::byte* list, std::size_t maxRecords) noexcept
+PatchStats KillInstantiatedSlurper(std::byte* character) noexcept
 {
     PatchStats stats{};
+    if (nullptr == character) return stats;
 
-    if (nullptr == list) return stats;
+    const std::uint16_t kind =
+        ReadValue<std::uint16_t>(character + kCharacterKindOffset);
 
-    for (std::size_t i = 0; i < maxRecords; ++i)
-    {
-        std::byte* const record = list + (i * kEntityRecordSize);
-        const std::uint16_t type = ReadU16(record);
+    if ((kBrownSlurperType != kind) && (kWhiteSlurperType != kind))
+        return stats;
 
-        if (0 == type) break;
+    const float maxHp =
+        ReadValue<float>(character + kCharacterMaxHpOffset);
+    const float currentHp =
+        ReadValue<float>(character + kCharacterCurrentHpOffset);
 
-        std::byte* const state = record + kEntityStateOffset;
+    // Initialization writes max HP before the enemy begins normal behavior.
+    // Waiting for a sane positive max HP avoids racing an incompletely
+    // initialized SubCharacter.
+    if (!std::isfinite(maxHp) || (maxHp <= 0.0f) || (maxHp > 100000.0f))
+        return stats;
 
-        if (kBrownSlurperType == type)
-        {
-            if (ReadU16(state) != kBrownSlurperDeadState)
-            {
-                WriteU16(state, kBrownSlurperDeadState);
-                ++stats.brownChanged;
-            }
-        }
-        else if (kWhiteSlurperType == type)
-        {
-            // White Slurper has no known "dead" variant in the discovered table.
-            // Convert it to Brown Slurper only after setting the Brown dead state.
-            // This ordering minimizes the window in which the game could observe
-            // an alive Brown Slurper during a concurrent read.
-            WriteU16(state, kBrownSlurperDeadState);
-            WriteU16(record, kBrownSlurperType);
-            ++stats.whiteChanged;
-        }
-    }
+    // Already dead/dying Slurpers are left completely untouched.
+    if (!std::isfinite(currentHp) || (currentHp <= 0.0f))
+        return stats;
+
+    constexpr float zeroHp = 0.0f;
+    WriteValue(character + kCharacterCurrentHpOffset, zeroHp);
+
+    if (kBrownSlurperType == kind)
+        ++stats.brownKilled;
+    else
+        ++stats.whiteKilled;
 
     return stats;
 }
