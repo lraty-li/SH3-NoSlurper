@@ -66,8 +66,9 @@ jobs:
         shell: pwsh
         env:
           NEXUSMODS_API_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
-          NEXUSMODS_FILE_ID: ${{ vars.NEXUSMODS_FILE_ID }}
-          NEXUSMODS_MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+          NEXUSMODS_FILE_ID: pRqzW4JHy
+          NEXUSMODS_MOD_ID: "19769734463580"
+          NEXUSMODS_API_FILE_ID: "8095740"
         run: |
           $manual = "${{ github.event.inputs.publish_nexusmods }}" -eq "true"
           $tag = "${{ github.ref_type }}" -eq "tag"
@@ -101,8 +102,8 @@ jobs:
         uses: Nexus-Mods/upload-action@v1.0.0-beta.10
         with:
           api_key: ${{ secrets.NEXUSMODS_API_KEY }}
-          file_id: ${{ vars.NEXUSMODS_FILE_ID }}
-          mod_id: ${{ vars.NEXUSMODS_MOD_ID }}
+          file_id: pRqzW4JHy
+          mod_id: "19769734463580"
           filename: ${{ steps.package.outputs.zip_path }}
           version: ${{ steps.version.outputs.value }}
           display_name: "SH3 No Slurper ${{ steps.version.outputs.value }}"
