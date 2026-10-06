@@ -175,10 +175,13 @@ std::uintptr_t FindEnemyManager() noexcept
             (0x8A != p[16]) || (0x91 != p[17]) ||
             (0x58 != p[18]) || (0x01 != p[19]) ||
             (0x84 != p[22]) || (0xD2 != p[23]) ||
-            (0x81 != p[28]) || (0xC1 != p[29]) ||
-            (0x60 != p[30]) || (0x01 != p[31]) ||
-            (0x83 != p[34]) || (0xF8 != p[35]) ||
-            (0x20 != p[36]))
+            (0x74 != p[24]) || (0x0D != p[25]) ||
+            (0x40 != p[26]) ||
+            (0x81 != p[27]) || (0xC1 != p[28]) ||
+            (0x60 != p[29]) || (0x01 != p[30]) ||
+            (0x83 != p[33]) || (0xF8 != p[34]) ||
+            (0x20 != p[35]) ||
+            (0x7C != p[36]) || (0xEA != p[37]))
         {
             continue;
         }
@@ -321,7 +324,7 @@ void AppendLogLine(const char* text) noexcept
 DWORD WINAPI WorkerThread(void*) noexcept
 {
     AppendLogLine(
-        "NoSlurper v0.2: runtime-HP worker started.");
+        "NoSlurper v0.2.1: runtime-HP worker started.");
 
     std::uintptr_t managerAddress = 0;
 
@@ -336,7 +339,7 @@ DWORD WINAPI WorkerThread(void*) noexcept
     if (0 == managerAddress)
     {
         AppendLogLine(
-            "NoSlurper v0.2: stopped before enemy manager was found.");
+            "NoSlurper v0.2.1: stopped before enemy manager was found.");
         return 0;
     }
 
@@ -345,7 +348,7 @@ DWORD WINAPI WorkerThread(void*) noexcept
         std::snprintf(
             line,
             sizeof(line),
-            "NoSlurper v0.2: enemy manager found at 0x%08X.",
+            "NoSlurper v0.2.1: enemy manager found at 0x%08X.",
             static_cast<unsigned int>(managerAddress));
         AppendLogLine(line);
     }
@@ -368,7 +371,7 @@ DWORD WINAPI WorkerThread(void*) noexcept
             std::snprintf(
                 line,
                 sizeof(line),
-                "NoSlurper v0.2: zeroed HP for %zu Slurper(s) "
+                "NoSlurper v0.2.1: zeroed HP for %zu Slurper(s) "
                 "(0x20A=%zu, 0x20B=%zu; cumulative=%zu).",
                 stats.totalKilled(),
                 stats.brownKilled,
@@ -380,7 +383,7 @@ DWORD WINAPI WorkerThread(void*) noexcept
         Sleep(kPatchIntervalMs);
     }
 
-    AppendLogLine("NoSlurper v0.2: worker stopped.");
+    AppendLogLine("NoSlurper v0.2.1: worker stopped.");
     return 0;
 }
 } // namespace

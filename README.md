@@ -2,7 +2,7 @@
 
 A tiny ASI mod for the Windows PC version of **Silent Hill 3**.
 
-Version 0.2 preserves every Slurper's original type, model, color/variant, and
+Version 0.2.1 preserves every Slurper's original type, model, color/variant, and
 scene placement. It only sets the instantiated enemy's **current HP** to zero and
 lets Silent Hill 3's own Slurper death logic handle the rest.
 
@@ -75,7 +75,7 @@ Install destination:
 
 Ultimate ASI Loader is already present in that installation.
 
-A `NoSlurper.log` file is written next to the ASI. Version 0.2 log entries say
+A `NoSlurper.log` file is written next to the ASI. Version 0.2.1 log entries say
 `runtime-HP` and report how many `0x20A` / `0x20B` enemies had their HP
 zeroed.
 
