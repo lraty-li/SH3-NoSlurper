@@ -16,3 +16,5 @@ reverse/*.id2
 reverse/*.nam
 reverse/*.til
 reverse/*.txt
+
+/dist/

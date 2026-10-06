@@ -1,0 +1,114 @@
+name: Release Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: "Package version suffix, for example v0.3.0"
+        required: false
+        type: string
+      publish_nexusmods:
+        description: "Upload generated package to Nexus Mods"
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve package version
+        id: version
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.package_version }}"
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            if ("${{ github.ref_type }}" -eq "tag") {
+              $version = "${{ github.ref_name }}"
+            } else {
+              $version = "build-${{ github.run_number }}"
+            }
+          }
+          "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build and package
+        id: package
+        shell: pwsh
+        run: |
+          ./package-release.ps1 -PackageVersion "${{ steps.version.outputs.value }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SH3-NoSlurper-${{ steps.version.outputs.value }}
+          path: ${{ steps.package.outputs.zip_path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.zip_path }}
+          generate_release_notes: true
+
+      - name: Resolve Nexus Mods publish
+        id: nexus
+        shell: pwsh
+        env:
+          NEXUSMODS_API_KEY: ${{ secrets.NEXUSMODS_API_KEY }}
+          NEXUSMODS_FILE_ID: ${{ vars.NEXUSMODS_FILE_ID }}
+          NEXUSMODS_MOD_ID: ${{ vars.NEXUSMODS_MOD_ID }}
+        run: |
+          $manual = "${{ github.event.inputs.publish_nexusmods }}" -eq "true"
+          $tag = "${{ github.ref_type }}" -eq "tag"
+          $requested = $manual -or $tag
+
+          $missing = [System.Collections.Generic.List[string]]::new()
+          if ([string]::IsNullOrWhiteSpace($env:NEXUSMODS_API_KEY)) {
+            $missing.Add("NEXUSMODS_API_KEY")
+          }
+          if ([string]::IsNullOrWhiteSpace($env:NEXUSMODS_FILE_ID)) {
+            $missing.Add("NEXUSMODS_FILE_ID")
+          }
+          if ([string]::IsNullOrWhiteSpace($env:NEXUSMODS_MOD_ID)) {
+            $missing.Add("NEXUSMODS_MOD_ID")
+          }
+
+          if ($manual -and $missing.Count -gt 0) {
+            throw "Nexus Mods publishing requested, but these settings are missing: $($missing -join ', ')."
+          }
+
+          if ($tag -and $missing.Count -gt 0) {
+            Write-Warning "Nexus Mods upload skipped; missing: $($missing -join ', ')."
+          }
+
+          $enabled = $requested -and $missing.Count -eq 0
+          "enabled=$($enabled.ToString().ToLowerInvariant())" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Publish Nexus Mods Release
+        if: steps.nexus.outputs.enabled == 'true'
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.10
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUSMODS_FILE_ID }}
+          mod_id: ${{ vars.NEXUSMODS_MOD_ID }}
+          filename: ${{ steps.package.outputs.zip_path }}
+          version: ${{ steps.version.outputs.value }}
+          display_name: "SH3 No Slurper ${{ steps.version.outputs.value }}"
+          description: "Automated release from GitHub tag ${{ steps.version.outputs.value }}"
+          category: main
+          archive_existing_version: true
+          allow_mod_manager_download: true
+          update_mod_version: true
+          changelog: "See the GitHub release notes for ${{ steps.version.outputs.value }}."
