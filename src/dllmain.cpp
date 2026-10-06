@@ -14,6 +14,50 @@ using namespace sh3_noslurper;
 
 constexpr DWORD kPatchIntervalMs = 16;
 
+constexpr std::uintptr_t kNativeDeadAiRva = 0x000F6110;
+constexpr std::uintptr_t kNativeDeadCallbackRva = 0x000F5030;
+
+bool ResolveNativeDeadFunctions(
+    std::uintptr_t& deadAi,
+    std::uintptr_t& deadCallback) noexcept
+{
+    const auto base = reinterpret_cast<std::uintptr_t>(
+        GetModuleHandleW(nullptr));
+    if (0 == base) return false;
+
+    deadAi = base + kNativeDeadAiRva;
+    deadCallback = base + kNativeDeadCallbackRva;
+
+    static constexpr std::uint8_t kDeadAiSig[] = {
+        0x56, 0x8B, 0x74, 0x24, 0x08, 0x66, 0x83, 0xBE,
+        0x54, 0x01, 0x00, 0x00, 0x00, 0x57, 0x8B, 0x7E
+    };
+    static constexpr std::uint8_t kDeadCallbackSig[] = {
+        0x56, 0x8B, 0x74, 0x24, 0x08, 0x8B, 0x46, 0x7C,
+        0x85, 0xC0, 0x75, 0x33, 0x8B, 0x86, 0xA4, 0x01
+    };
+
+    if (!IsBadReadPtr(
+            reinterpret_cast<const void*>(deadAi),
+            sizeof(kDeadAiSig)) &&
+        !IsBadReadPtr(
+            reinterpret_cast<const void*>(deadCallback),
+            sizeof(kDeadCallbackSig)))
+    {
+        return
+            (0 == std::memcmp(
+                reinterpret_cast<const void*>(deadAi),
+                kDeadAiSig,
+                sizeof(kDeadAiSig))) &&
+            (0 == std::memcmp(
+                reinterpret_cast<const void*>(deadCallback),
+                kDeadCallbackSig,
+                sizeof(kDeadCallbackSig)));
+    }
+
+    return false;
+}
+
 HMODULE g_module = nullptr;
 volatile LONG g_stopRequested = 0;
 
@@ -206,8 +250,10 @@ std::uintptr_t FindEnemyManager() noexcept
     return 0;
 }
 
-PatchStats KillAllInstantiatedSlurpers(
-    std::uintptr_t managerAddress) noexcept
+PatchStats TransitionAllSlurpersToNativeDead(
+    std::uintptr_t managerAddress,
+    std::uintptr_t nativeDeadAi,
+    std::uintptr_t nativeDeadCallback) noexcept
 {
     PatchStats total{};
 
@@ -264,20 +310,45 @@ PatchStats KillAllInstantiatedSlurpers(
             continue;
         }
 
-        if (!IsReadableRange(
-                character + kCharacterMaxHpOffset,
-                sizeof(float)) ||
-            !IsWritableRange(
+        const bool slotWritable =
+            IsWritableRange(
+                slot + kEnemySlotFunctionOffset,
+                sizeof(std::uintptr_t)) &&
+            IsWritableRange(
+                slot + kEnemySlotDeadAnimFlagOffset,
+                sizeof(std::uint16_t)) &&
+            IsWritableRange(
+                slot + kEnemySlotDeadParamOffset,
+                0x10);
+
+        const bool characterWritable =
+            IsWritableRange(
+                character + kCharacterDeathLatchOffset,
+                sizeof(std::uint32_t)) &&
+            IsWritableRange(
+                character + kCharacterCallbackOffset,
+                sizeof(std::uintptr_t)) &&
+            IsWritableRange(
                 character + kCharacterCurrentHpOffset,
-                sizeof(float)))
-        {
-            continue;
-        }
+                sizeof(float)) &&
+            IsReadableRange(
+                character + kCharacterMaxHpOffset,
+                sizeof(float)) &&
+            IsWritableRange(
+                character + kCharacterBattleStatusOffset,
+                sizeof(std::uint32_t));
+
+        if (!slotWritable || !characterWritable) continue;
 
         const PatchStats one =
-            KillInstantiatedSlurper(character);
-        total.brownKilled += one.brownKilled;
-        total.whiteKilled += one.whiteKilled;
+            TransitionSlurperToNativeDead(
+                slot,
+                character,
+                nativeDeadAi,
+                nativeDeadCallback);
+
+        total.brownTransitioned += one.brownTransitioned;
+        total.whiteTransitioned += one.whiteTransitioned;
     }
 
     return total;
@@ -324,7 +395,32 @@ void AppendLogLine(const char* text) noexcept
 DWORD WINAPI WorkerThread(void*) noexcept
 {
     AppendLogLine(
-        "NoSlurper v0.2.1: runtime-HP worker started.");
+        "NoSlurper v0.3.0: native-dead-state worker started.");
+
+    std::uintptr_t nativeDeadAi = 0;
+    std::uintptr_t nativeDeadCallback = 0;
+
+    if (!ResolveNativeDeadFunctions(
+            nativeDeadAi,
+            nativeDeadCallback))
+    {
+        AppendLogLine(
+            "NoSlurper v0.3.0: native dead functions did not match "
+            "the installed executable; no patch applied.");
+        return 0;
+    }
+
+    {
+        char line[192]{};
+        std::snprintf(
+            line,
+            sizeof(line),
+            "NoSlurper v0.3.0: native dead AI=0x%08X, "
+            "callback=0x%08X.",
+            static_cast<unsigned int>(nativeDeadAi),
+            static_cast<unsigned int>(nativeDeadCallback));
+        AppendLogLine(line);
+    }
 
     std::uintptr_t managerAddress = 0;
 
@@ -339,7 +435,7 @@ DWORD WINAPI WorkerThread(void*) noexcept
     if (0 == managerAddress)
     {
         AppendLogLine(
-            "NoSlurper v0.2.1: stopped before enemy manager was found.");
+            "NoSlurper v0.3.0: stopped before enemy manager was found.");
         return 0;
     }
 
@@ -348,7 +444,7 @@ DWORD WINAPI WorkerThread(void*) noexcept
         std::snprintf(
             line,
             sizeof(line),
-            "NoSlurper v0.2.1: enemy manager found at 0x%08X.",
+            "NoSlurper v0.3.0: enemy manager found at 0x%08X.",
             static_cast<unsigned int>(managerAddress));
         AppendLogLine(line);
     }
@@ -360,22 +456,26 @@ DWORD WINAPI WorkerThread(void*) noexcept
                     &g_stopRequested, 0, 0))
     {
         const PatchStats stats =
-            KillAllInstantiatedSlurpers(managerAddress);
+            TransitionAllSlurpersToNativeDead(
+                managerAddress,
+                nativeDeadAi,
+                nativeDeadCallback);
 
-        if (stats.totalKilled() > 0)
+        if (stats.totalTransitioned() > 0)
         {
-            cumulativeBrown += stats.brownKilled;
-            cumulativeWhite += stats.whiteKilled;
+            cumulativeBrown += stats.brownTransitioned;
+            cumulativeWhite += stats.whiteTransitioned;
 
-            char line[192]{};
+            char line[224]{};
             std::snprintf(
                 line,
                 sizeof(line),
-                "NoSlurper v0.2.1: zeroed HP for %zu Slurper(s) "
-                "(0x20A=%zu, 0x20B=%zu; cumulative=%zu).",
-                stats.totalKilled(),
-                stats.brownKilled,
-                stats.whiteKilled,
+                "NoSlurper v0.3.0: transitioned %zu Slurper(s) "
+                "to native dead state (0x20A=%zu, 0x20B=%zu; "
+                "cumulative=%zu).",
+                stats.totalTransitioned(),
+                stats.brownTransitioned,
+                stats.whiteTransitioned,
                 cumulativeBrown + cumulativeWhite);
             AppendLogLine(line);
         }
@@ -383,7 +483,7 @@ DWORD WINAPI WorkerThread(void*) noexcept
         Sleep(kPatchIntervalMs);
     }
 
-    AppendLogLine("NoSlurper v0.2.1: worker stopped.");
+    AppendLogLine("NoSlurper v0.3.0: worker stopped.");
     return 0;
 }
 } // namespace
